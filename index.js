@@ -1,215 +1,216 @@
-/**
- * This script sets up an incoming payment on a receiving wallet address,
- * and creates two outgoing payments on the sending wallet address.
- *
- * One of the steps will be asking for an outgoing payment grant for the sending wallet address.
- * Since this needs user interaction, you will need to navigate to the URL, and accept the interactive grant.
- *
- * To start, please add the variables for configuring the client & the wallet addresses for the payment.
- */
-
 import {
-  createAuthenticatedClient,
-  isFinalizedGrantWithAccessToken,
-  isPendingGrant,
+    createAuthenticatedClient,
+    isFinalizedGrantWithAccessToken,
+    isPendingGrant,
 } from "@interledger/open-payments";
 import readline from "readline/promises";
 
 (async () => {
-  const readlineInterface = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+    const readlineInterface = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
 
-  const promptNextStep = () =>
-    readlineInterface.question(`\nPress enter for next step...\n`);
+    const promptNextStep = () =>
+        readlineInterface.question(`\nPress enter for next step...\n`);
 
-  // Client configuration
-  const PRIVATE_KEY_PATH = "private.key";
-  const KEY_ID = "3f9073de-53c3-4c65-b149-2acb09f479f5";
+    // Client configuration
+    const PRIVATE_KEY_PATH = "private.key";
+    const KEY_ID = "3f9073de-53c3-4c65-b149-2acb09f479f5";
 
-  // Make sure the wallet addresses starts with https:// (not $)
-  const CLIENT_WALLET_ADDRESS_URL = "https://ilp.interledger-test.dev/rabbits";
-  const SENDING_WALLET_ADDRESS_URL = "https://ilp.interledger-test.dev/chris-baryo";
-  const RECEIVING_WALLET_ADDRESS_URL = "https://ilp.interledger-test.dev/galactic-mouse";
+    // Make sure the wallet addresses starts with https:// (not $)
+    const CLIENT_WALLET_ADDRESS_URL = "https://ilp.interledger-test.dev/rabbits";
+    const SENDING_WALLET_ADDRESS_URL = "https://ilp.interledger-test.dev/chris-baryo";
+    const RECEIVING_WALLET_ADDRESS_URL = "https://ilp.interledger-test.dev/galactic-mouse";
 
-  // 1. Create client
+    // 1. Create client
 
-  const client = await createAuthenticatedClient({
-    walletAddressUrl: CLIENT_WALLET_ADDRESS_URL,
-    keyId: KEY_ID,
-    privateKey: PRIVATE_KEY_PATH,
-  });
+    const client = await createAuthenticatedClient({
+        walletAddressUrl: CLIENT_WALLET_ADDRESS_URL,
+        keyId: KEY_ID,
+        privateKey: PRIVATE_KEY_PATH,
+    });
 
-  console.log("Initialized client", {
-    CLIENT_WALLET_ADDRESS_URL,
-  });
+    console.log("Initialized client", {
+        CLIENT_WALLET_ADDRESS_URL,
+    });
 
-  await promptNextStep();
+    await promptNextStep();
 
-  // 2. Get wallet addresses
-  const sendingWalletAddress = await client.walletAddress.get({
-    url: SENDING_WALLET_ADDRESS_URL,
-  });
-  const receivingWalletAddress = await client.walletAddress.get({
-    url: RECEIVING_WALLET_ADDRESS_URL,
-  });
+    // Get Wallet Addresses
+    const customerWalletAddress = await client.walletAddress.get({
+        url: SENDING_WALLET_ADDRESS_URL
+    })
+    const retailerWalletAddress = await client.walletAddress.get({
+        url: RECEIVING_WALLET_ADDRESS_URL
+    })
 
-  console.log("Got wallet addresses", {
-    receivingWalletAddress,
-    sendingWalletAddress,
-  });
+    console.log("Got wallet addresses", {
+        customerWalletAddress,
+        retailerWalletAddress,
+    });
 
-  await promptNextStep();
+    await promptNextStep();
 
-  // 3. Get incoming payment grant
-  const incomingPaymentGrant = await client.grant.request(
-    {
-      url: receivingWalletAddress.authServer,
-    },
-    {
-      access_token: {
-        access: [
-          {
-            type: "incoming-payment",
-            actions: ["create"],
-          },
-        ],
-      },
-    },
-  );
+    // 3. Get incoming payment grant
+    const retailerIncomingPaymentGrant = await client.grant.request(
+        {
+            url: retailerWalletAddress.authServer
+        },
+        {
+            access_token: {
+                access: [
+                    {
+                        type: 'incoming-payment',
+                        actions: ['create']
+                    }
+                ]
+            }
+        }
+    )
 
-  if (!isFinalizedGrantWithAccessToken(incomingPaymentGrant)) {
-    throw new Error("Expected finalized incoming payment grant");
-  }
+    if (!isFinalizedGrantWithAccessToken(retailerIncomingPaymentGrant)) {
+        throw new Error('Expected finalized grant')
+    }
 
-  console.log("Got incoming payment grant", incomingPaymentGrant);
+    console.log("Got incoming payment grant", retailerIncomingPaymentGrant);
 
-  await promptNextStep();
+    await promptNextStep();
 
-  // 4. Create incoming payment on receiver's wallet address
-  const totalAmount = 5000;
+    // Create an incoming payment
+    const retailerIncomingPayment = await client.incomingPayment.create(
+        {
+            url: retailerWalletAddress.resourceServer,
+            accessToken: retailerIncomingPaymentGrant.access_token.value
+        },
+        {
+            walletAddress: retailerWalletAddress.id,
+            incomingAmount: {
+                value: '140000',
+                assetCode: 'EGG',
+                assetScale: 2
+            }
+        }
+    )
 
-  const incomingPayment = await client.incomingPayment.create(
-    {
-      url: receivingWalletAddress.resourceServer,
-      accessToken: incomingPaymentGrant.access_token.value,
-    },
-    {
-      walletAddress: receivingWalletAddress.id,
-      metadata: {
-        description: "Book order",
-      },
-      incomingAmount: {
-        assetCode: receivingWalletAddress.assetCode,
-        assetScale: receivingWalletAddress.assetScale,
-        value: totalAmount.toString(),
-      },
-    },
-  );
+    console.log("Created incoming payment", retailerIncomingPayment);
 
-  console.log("Created incoming payment", incomingPayment);
+    await promptNextStep();
 
-  await promptNextStep();
+    // Create a quote grant 
+    const customerQuoteGrant = await client.grant.request(
+        {
+            url: customerWalletAddress.authServer
+        },
+        {
+            access_token: {
+                access: [
+                    {
+                        type: 'quote',
+                        actions: ['create']
+                    }
+                ]
+            }
+        }
+    )
 
-  // 5. Create & accept outgoing payment grant on sender's wallet address
-  const outgoingPaymentGrant = await client.grant.request(
-    {
-      url: sendingWalletAddress.authServer,
-    },
-    {
-      access_token: {
-        access: [
-          {
-            type: "outgoing-payment",
-            actions: ["create"],
-            limits: {
-              debitAmount: {
-                assetCode: sendingWalletAddress.assetCode,
-                assetScale: sendingWalletAddress.assetScale,
-                value: totalAmount.toString(),
-              },
+    if (!isFinalizedGrantWithAccessToken(customerQuoteGrant)) {
+        throw new Error('Expected finalized grant')
+    }
+
+    console.log("Got quote grant", customerQuoteGrant);
+
+    await promptNextStep();
+
+    // Create a quote
+    const customerQuote = await client.quote.create(
+        {
+            url: customerWalletAddress.resourceServer,
+            accessToken: customerQuoteGrant.access_token.value
+        },
+        {
+            method: 'ilp',
+            walletAddress: customerWalletAddress.id,
+            receiver: retailerIncomingPayment.id
+        }
+    )
+
+    console.log("Created quote", customerQuote);
+
+    await promptNextStep();
+
+    // Create an interactive outgoing payment grant
+    const pendingCustomerOutgoingPaymentGrant = await client.grant.request(
+        {
+            url: customerWalletAddress.authServer
+        },
+        {
+            access_token: {
+                access: [
+                    {
+                        identifier: customerWalletAddress.id,
+                        type: 'outgoing-payment',
+                        actions: ['create'],
+                        limits: {
+                            debitAmount: {
+                                assetCode: 'EGG',
+                                assetScale: 2,
+                                value: '140000'
+                            }
+                        }
+                    }
+                ]
             },
-            identifier: sendingWalletAddress.id,
-          },
-        ],
-      },
-      interact: {
-        start: ["redirect"],
-      },
-    },
-  );
+            interact: {
+                start: ['redirect']
+            }
+        }
+    )
 
-  if (!isPendingGrant(outgoingPaymentGrant)) {
-    throw new Error("Expected pending grant");
-  }
+    if (!isPendingGrant(pendingCustomerOutgoingPaymentGrant)) {
+        throw new Error('Expected pending/interactive grant')
+    }
 
-  console.log("Got pending outgoing payment grant", outgoingPaymentGrant);
+    console.log("Got pending outgoing payment grant", pendingCustomerOutgoingPaymentGrant);
 
-  await promptNextStep();
+    await promptNextStep();
 
-  // 6. Continue outgoing payment grant
-  const finalizedOutgoingPaymentGrant = await client.grant.continue({
-    url: outgoingPaymentGrant.continue.uri,
-    accessToken: outgoingPaymentGrant.continue.access_token.value,
-  });
+    // Continue the outgoing payment grant
+    const customerOutgoingPaymentGrant = await client.grant.continue({
+        url:
+            pendingCustomerOutgoingPaymentGrant.continue.uri,
+        accessToken: pendingCustomerOutgoingPaymentGrant.continue.access_token.value,
+    });
 
-  if (!isFinalizedGrantWithAccessToken(finalizedOutgoingPaymentGrant)) {
-    throw new Error("Expected finalized grant");
-  }
+    if (!isFinalizedGrantWithAccessToken(customerOutgoingPaymentGrant)) {
+        throw new Error("Expected finalized grant");
+    }
 
-  console.log(
-    "Got finalized outgoing payment grant",
-    finalizedOutgoingPaymentGrant,
-  );
+    console.log(
+        "Got finalized outgoing payment grant",
+        customerOutgoingPaymentGrant,
+    );
 
-  await promptNextStep();
+    await promptNextStep();
 
-  // 7. Create first outgoing payment
-  const outgoingPayment = await client.outgoingPayment.create(
-    {
-      url: sendingWalletAddress.resourceServer,
-      accessToken: finalizedOutgoingPaymentGrant.access_token.value,
-    },
-    {
-      walletAddress: sendingWalletAddress.id,
-      incomingPayment: incomingPayment.id,
-      debitAmount: {
-        assetCode: sendingWalletAddress.assetCode,
-        assetScale: sendingWalletAddress.assetScale,
-        value: (totalAmount / 2).toString(),
-      },
-      metadata: {
-        description: "First payment (for book one)",
-      },
-    },
-  );
+    // Create an outgoing payment
+    const customerOutgoingPayment = await client.outgoingPayment.create(
+        {
+            url: customerWalletAddress.resourceServer,
+            accessToken: customerOutgoingPaymentGrant.access_token.value
+        },
+        {
+            walletAddress: customerWalletAddress.id,
+            quoteId: customerQuote.id
+        }
+    )
 
-  console.log("Created outgoing payment", outgoingPayment);
+    console.log("Created outgoing payment", customerOutgoingPayment);
+    
+    await promptNextStep();
 
-  await promptNextStep();
+    console.log("Payment completed successfully!");
 
-  // 8. Create second outgoing payment
-  const outgoingPayment2 = await client.outgoingPayment.create(
-    {
-      url: sendingWalletAddress.resourceServer,
-      accessToken: finalizedOutgoingPaymentGrant.access_token.value,
-    },
-    {
-      walletAddress: sendingWalletAddress.id,
-      incomingPayment: incomingPayment.id,
-      debitAmount: {
-        assetCode: sendingWalletAddress.assetCode,
-        assetScale: sendingWalletAddress.assetScale,
-        value: (totalAmount / 2).toString(),
-      },
-      metadata: {
-        description: "Second payment (for book two)",
-      },
-    },
-  );
+    process.exit(0);
 
-  console.log("Created second outgoing payment", outgoingPayment2);
-
-  process.exit();
 })();
